@@ -332,30 +332,52 @@ class Workers {
         return null;
       }
       const genetic = new Genetic(parameters.settings, parameters.tuning);
+      const perfBeginning = performance.now();
+      let firstFitness = null;
+      let lastFitness = null;
 
       for (let generation = 0; generation < parameters.settings.maxgenerations; generation++) {
+        const perfOne = performance.now();
         const newGenerations = await this.operation('EVOLVE', genetic);
+        const perfOneTime = performance.now() - perfOne;
         const sorted = parameters.settings.maximize ? newGenerations.sort((a,b) => b.fitness - a.fitness) : newGenerations.sort((a,b) => a.fitness - b.fitness);
 
         // only keep the population size
         genetic.population = sorted.slice(0, parameters.settings.populationsize);
-        parameters.notify(generation, genetic.population[0]);
-        if ((parameters.settings.solutionfitness !== undefined) && (genetic.population[0].fitness == parameters.settings.solutionfitness)) {
+
+        const bestFitness = genetic.population[0].fitness;
+        if ((parameters.settings.solutionfitness !== undefined) && (bestFitness == parameters.settings.solutionfitness)) {
           // we actually found an accurate solution earlier
           break;
         }
 
+        const overallTime = performance.now() - perfBeginning;
+        let speedOverall = 0;
+        let speedCurrent = 0;
+        if (firstFitness !== null) {
+          const fitDiffOverall = bestFitness - firstFitness;
+          speedOverall = fitDiffOverall / overallTime;
+        }
+        if ((lastFitness !== null) && (lastFitness !== bestFitness)) {
+          const fitDiffCurrent = bestFitness - lastFitness;
+          speedCurrent = fitDiffCurrent / perfOneTime;
+        }
+
+        parameters.notify(generation, genetic.population[0], speedOverall, speedCurrent);
+
+        // keep statistics up to date
+        if (firstFitness === null) {
+          firstFitness = bestFitness;
+        }
+        lastFitness = bestFitness;
+
         // tune variables
         // tune gene probabilities
-        this.fade(genetic.geneProb, genetic.tuning.fading.val, this.tuneProbabilities(genetic.population));
+        //this.fade(genetic.geneProb, genetic.tuning.fading.val, this.tuneProbabilities(genetic.population));
       }
-      console.log(genetic.geneProb);
       return genetic.population;
     }
 
-    async evolveOne(newpopulation) {
-        return await this.operation('EVOLVE', newpopulation);
-    }
 }
 
 const Concurrency = new Workers();
