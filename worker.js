@@ -294,23 +294,22 @@ class Workers {
       return loaded.reduce((allAnd, result) => allAnd && result, true);
     }
 
-    getStandardDeviation (array) {
-      const n = array.length
-      const mean = array.reduce((a, b) => a + b) / n
-      return Math.sqrt(array.map(x => Math.pow(x - mean, 2)).reduce((a, b) => a + b) / n)
-    }
-
     tuneProbabilities(population) {
-      const len = population[0].genes.length;
-      const stdDev = [];
-      for (let i = 0; i < len; i++) {
-        const genesOfSameIndex = [];
-        for (const pop of population) {
-          genesOfSameIndex.push(pop.genes[i]);
+      // population is ordered. The further we go, the better
+      // the fitness gets (increasing/decreasing depending on min/max)
+      const vectorDeviation = new Array(population[0].genes.length).fill(1); // start with all ones
+      for (let i = 1; i < population.length; i++) {
+        const curr = population[i].genes;
+        const last = population[i-1].genes;
+        const fitDiff = Math.abs(population[i].fitness - population[i-1].fitness);
+        for (let g = 0; g < curr.length; g++) {
+          // the difference in the same gene index is a rough indicator of
+          // which gene changed. It's like to have had an affect on the computed
+          // fitness, the larger the fitness difference is.
+          vectorDeviation[i] += fitDiff * Math.abs(curr[g] - last[g]);
         }
-        stdDev.push(1 + this.getStandardDeviation(genesOfSameIndex));
       }
-      return stdDev;
+      return vectorDeviation;
     }
 
     /**
@@ -325,6 +324,18 @@ class Workers {
       }
     }
 
+    /**
+     * Tunes the variables to increase speed.
+     * @param {Number} speedDiff Valua indicating speed increase (+) or decrease (-)
+     */
+    tuneVariables (speedDiff) {
+      if (speedDiff > 0) {
+        console.log(`Speed increased! :-)  :${speedDiff}`);
+      } else {
+        console.log(`Speed decreased  :-(  :${speedDiff}`);
+      }
+    }
+
     async evolution(parameters) {
       const allgood = await this.loadFunctions(parameters);
       if (allgood !== true) {
@@ -335,6 +346,7 @@ class Workers {
       const perfBeginning = performance.now();
       let firstFitness = null;
       let lastFitness = null;
+      let prevSpeed = 0;
 
       for (let generation = 0; generation < parameters.settings.maxgenerations; generation++) {
         const perfOne = performance.now();
@@ -355,12 +367,15 @@ class Workers {
         let speedOverall = 0;
         let speedCurrent = 0;
         if (firstFitness !== null) {
-          const fitDiffOverall = bestFitness - firstFitness;
+          const fitDiffOverall = Math.abs(bestFitness - firstFitness);
           speedOverall = fitDiffOverall / overallTime;
         }
         if ((lastFitness !== null) && (lastFitness !== bestFitness)) {
-          const fitDiffCurrent = bestFitness - lastFitness;
+          const fitDiffCurrent = Math.abs(bestFitness - lastFitness);
           speedCurrent = fitDiffCurrent / perfOneTime;
+          // tune variables if we know the current speed
+          this.tuneVariables(speedCurrent - prevSpeed);
+          prevSpeed = speedCurrent;
         }
 
         parameters.notify(generation, genetic.population[0], speedOverall, speedCurrent);
@@ -371,9 +386,8 @@ class Workers {
         }
         lastFitness = bestFitness;
 
-        // tune variables
         // tune gene probabilities
-        //this.fade(genetic.geneProb, genetic.tuning.fading.val, this.tuneProbabilities(genetic.population));
+        this.fade(genetic.geneProb, genetic.tuning.fading.val, this.tuneProbabilities(genetic.population));
       }
       return genetic.population;
     }

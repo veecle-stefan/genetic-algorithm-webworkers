@@ -7,11 +7,11 @@ class PicGenetic {
   GeneSpectrum = this.GeneMax - this.GeneMin;
 
   settings = {
-    genelength: 1000,
+    genelength: 300,
     populationsize: 1000,
     maxgenerations: 1000,
     solutionfitness: 0,
-    chunksize: 20
+    chunksize: 11
   };
 
   tuning = {
