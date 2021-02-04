@@ -7,16 +7,16 @@ class PicGenetic {
   GeneSpectrum = this.GeneMax - this.GeneMin;
 
   settings = {
-    genelength: 300,
+    genelength: 100,
     populationsize: 1000,
     maxgenerations: 1000,
     solutionfitness: 0,
-    chunksize: 11
+    chunksize: 9
   };
 
   tuning = {
-    geneshift: new Tune(10, 2, 20),
-    geneflips: new Tune(10, 2, 20),
+    geneshift: new Tune(10, 2, 50),
+    geneflips: new Tune(10, 2, 50),
     newkids: new Tune(250, 10, 1000),
     mutate: new Tune(0.3, 0.1, 1.0),
     crossover: new Tune(0.9, 0.1, 1.0)
@@ -49,7 +49,7 @@ class PicGenetic {
   	ctx.fillStyle = `rgb(${r<<4},${g<<4},${b<<4})`;
     */
     const r = color * 255 / this.GeneMax;
-    ctx.fillStyle = `rgb(${r},${r},${r})`;
+    ctx.fillStyle = `rgba(${r},${r},${r},.5)`;
   	ctx.beginPath();
   	let centerx = arr[1] / sx;
   	let centery = arr[2] / sy;
@@ -84,14 +84,29 @@ class PicGenetic {
   	return ctx.getImageData(0, 0, width, height);
   };
 
+
+  imgDiff3 = (img1, img2) => {
+  	const w = img1.width;
+    const h = img1.height;
+    
+    const len = w * h * 4;
+  	let totalDiff = 0;
+
+  	for (i = 0; i < len; i += 10) {
+      const diff = Math.abs(img1.data[i] - img2.data[i]);
+  			totalDiff += diff / 10;
+  	}
+    return totalDiff;
+  }
+
   imgDiff = (img1, img2) => {
   	const w = img1.width;
   	const h = img1.height;
 
   	let totalDiff = 0;
 
-  	for (let x = 0; x < w; x++) {
-  		for (let y = 0; y < h; y++) {
+  	for (let x = 0; x < w; x+=2) {
+  		for (let y = 0; y < h; y+=2) {
   			var index = (w * y + x) * 4;
   			const r1 = img1.data[index]
   			const g1 = img1.data[index + 1];

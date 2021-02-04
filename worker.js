@@ -101,7 +101,7 @@ function worker_function(workerNum) {
       let pickDepth = genetics.population.length; // limit picks to parents from curentt before (excluding newly added)
 
       for (let p = 0; p < genetics.tuning.newkids.val; p++) {
-        pickDepth = genetics.population.length;
+        pickDepth = genetics.population.length * genetics.tuning.pickdepth.val;
         const doCross = Math.random() < genetics.tuning.crossover.val; // probability for crossover
         const doMutate = Math.random() < genetics.tuning.mutate.val; // mutate additionaly to crossover?
         if (doCross) {
@@ -173,11 +173,15 @@ function worker_function(workerNum) {
 }
 
 class Tune {
+  lastDirection = 0;
+  touched = false;
+
   constructor (initial, min, max) {
     this.initial = initial;
     this.val = initial;
     this.min = min;
     this.max = max;
+    this.lastDirection = (max - min) / 10; // try with 10% change in the beginning
   }
 
   valueOf() {
@@ -192,10 +196,11 @@ class Genetic {
     populationsize: 1000,
   };
   tuning = {
-    fading: new Tune(0.1, 0.01, 0.9),
+    fading: new Tune(0.5, 0.01, 0.9),
     newkids: new Tune(250, 10, 1000),
     mutate: new Tune(0.3, 0.1, 1.0),
-    crossover: new Tune(0.9, 0.1, 1.0)
+    crossover: new Tune(0.9, 0.1, 1.0),
+    pickdepth: new Tune(0.9, 0.1, 1.0)
   };
   population = [];
   geneProb = [];
@@ -324,16 +329,70 @@ class Workers {
       }
     }
 
+    tuneStop (tuneVar, speedDiff, speedOverall) {
+      if (speedDiff > speedOverall / 10) {
+        // significant increase
+        // had a positive effect. Keep it!
+        return true;
+      } else {
+        // was not so good. Revert.
+        tuneVar.lastDirection = -tuneVar.lastDirection;
+        tuneVar.val += tuneVar.lastDirection; // go back to before
+        return false;
+      }
+    }
+
+    tuneStart (tuneVar) {
+      tuneVar.val += tuneVar.lastDirection;
+      if (tuneVar.val < tuneVar.min) tuneVar.val = tuneVar.min;
+      if (tuneVar.val > tuneVar.max) tuneVar.val = tuneVar.max;
+      tuneVar.lastDirection *= 0.9;
+    }
+
+    tuneDebug (tuning) {
+      let debugStr = 'Tuning: ';
+      for (const t in tuning) {
+        const tuneVar = tuning[t];
+        debugStr += `${t}:${tuneVar.val}, `;
+      }
+      console.log(debugStr);
+    }
+
     /**
      * Tunes the variables to increase speed.
      * @param {Number} speedDiff Valua indicating speed increase (+) or decrease (-)
      */
-    tuneVariables (speedDiff) {
-      if (speedDiff > 0) {
-        console.log(`Speed increased! :-)  :${speedDiff}`);
-      } else {
-        console.log(`Speed decreased  :-(  :${speedDiff}`);
+    tuneVariables (tuning, speedDiff, speedOverall) {
+      // tuning       contains all the variables that can be potentially tuned.
+      // speedDiff    is the result of the last round and signals either an
+      //              increase in speed (>0) or decrease in speed (<0)
+      // speedOverall is the average speed so far. Good relative reference to
+      //              judge speedDiff better
+      let suggest = null;
+      for (const t in tuning) {
+        const tuneVar = tuning[t];
+        if (tuneVar.touched) {
+          // This was the tuning of the last round. Check result
+          if (this.tuneStop(tuneVar, speedDiff, speedOverall)) {
+            // was successful tune -> go on!
+            suggest = t;
+          }
+          tuneVar.touched = false; // reset
+        }
       }
+
+      let newT = null;
+      if (suggest) {
+        newT = suggest;
+      } else {
+        // select a random new one
+        const allTuningNames = Object.keys(tuning);
+        const rndIdx = Math.floor(Math.random() * allTuningNames.length);
+        newT = allTuningNames[rndIdx];
+      }
+      tuning[newT].touched = true; // let the fun begin ...
+      this.tuneStart(tuning[newT]);
+      this.tuneDebug(tuning);
     }
 
     async evolution(parameters) {
@@ -364,7 +423,7 @@ class Workers {
         }
 
         const overallTime = performance.now() - perfBeginning;
-        let speedOverall = 0;
+        let speedOverall = -1;
         let speedCurrent = 0;
         if (firstFitness !== null) {
           const fitDiffOverall = Math.abs(bestFitness - firstFitness);
@@ -374,7 +433,9 @@ class Workers {
           const fitDiffCurrent = Math.abs(bestFitness - lastFitness);
           speedCurrent = fitDiffCurrent / perfOneTime;
           // tune variables if we know the current speed
-          this.tuneVariables(speedCurrent - prevSpeed);
+          if (speedOverall > 0) {
+            this.tuneVariables(genetic.tuning, speedCurrent - prevSpeed, speedOverall);
+          }
           prevSpeed = speedCurrent;
         }
 
