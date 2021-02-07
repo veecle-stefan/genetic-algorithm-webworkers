@@ -1,6 +1,7 @@
 'use strict';
 function worker_function(workerNum) {
 
+
   this.deserialise = (str) => {
     return JSON.parse(str, function (key, value) {
       if (typeof value != "string") return value;
@@ -233,9 +234,9 @@ class BackgroundTask {
     _worker = null;
     _num;
 
-    constructor (workerNum) {
+    constructor (workerNum, url) {
         this._num = workerNum;
-        this._worker = new Worker(URL.createObjectURL(new Blob(["("+worker_function.toString()+")()"], {type: 'text/javascript'})));
+        this._worker = new Worker(url);
     }
 
     workerFunctionCall(fnName, args) {
@@ -260,13 +261,24 @@ class BackgroundTask {
 }
 
 class Workers {
+    _externalScripts = [ expDelaunator ];
     runningWorkers = [];
 
     constructor () {
+      let scriptDependencies = '';
+      for (const dep of this._externalScripts) {
+        scriptDependencies += `(${dep})();`;
+      }
+      const mainScriptURL = this.createURLFromFunction(worker_function, scriptDependencies);
         for (let w = 0; w < maxWorkers; w++) {
-            this.runningWorkers.push(new BackgroundTask(w));
+            this.runningWorkers.push(new BackgroundTask(w, mainScriptURL));
         }
     }
+
+    createURLFromFunction(func, deps = '') {
+      return URL.createObjectURL(new Blob([`${deps} (${func.toString()})();`], {type: 'text/javascript'}));
+    }
+
 
     async distribute (fnCall, dataset, ...args) {
         const promises = this.runningWorkers.map( w => {

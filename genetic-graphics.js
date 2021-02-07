@@ -10,8 +10,7 @@ class PicGenetic {
     genelength: 100,
     populationsize: 1000,
     maxgenerations: 1000,
-    solutionfitness: 0,
-    chunksize: 9
+    solutionfitness: 0
   };
 
   tuning = {
@@ -29,75 +28,76 @@ class PicGenetic {
     this.height = imgData.height;
   }
 
-  drawFilledPoly = (ctx, arr, width, height) => {
-    if (arr.length < 6) {
-      // we need at least color, x, y, and 3 points
-      return;
+  getPixel = (imgData, w, x, y) => {
+    const index = (w * y + x) * 4;
+    const r = imgData.data[index]
+    const g = imgData.data[index + 1];
+    const b = imgData.data[index + 2];
+
+    return [r, g, b];
+  };
+
+  mergeColors = (imgData, w, points) => {
+    const merged = [0, 0, 0];
+    for (const p of points) {
+      const rgb = this.getPixel(imgData, w, p[0], p[1]);
+      merged[0] += Math.floor(rgb[0] / points.length);
+      merged[1] += Math.floor(rgb[1] / points.length);
+      merged[2] += Math.floor(rgb[2] / points.length);
     }
+    return merged;
+  };
 
-    const sx = this.GeneMax / width;
-    const sy = this.GeneMax / height;
-
-    const color = arr[0];
-
-    /*
-  	// color is 12 bit value
-  	const r = ((color & 0xF00) >> 8);
-  	const g = ((color & 0x0F0) >> 4);
-  	const b = (color & 0x00F);
-
-  	ctx.fillStyle = `rgb(${r<<4},${g<<4},${b<<4})`;
-    */
-    const r = color * 255 / this.GeneMax;
-    ctx.fillStyle = `rgba(${r},${r},${r},.5)`;
+  drawPolygon = (ctx, orgImage, points, w) => {
+    const mix = this.mergeColors(orgImage, w, points);
+    
+    ctx.fillStyle = `rgb(${mix[0]},${mix[1]},${mix[2]})`;
   	ctx.beginPath();
-  	let centerx = arr[1] / sx;
-  	let centery = arr[2] / sy;
-    const points = arr.slice(3);
-    const maxIndex = points.length;
-  	for (let i = 0; i < maxIndex; i ++) {
-  		const length = points[i] / sx / 2;
-  		const angle = Math.PI * 2 / maxIndex * i;
-  		const x = centerx + Math.sin(angle) * length;
-  		const y = centery + Math.cos(angle) * length;
-  		ctx.lineTo(x,y);
+  	for (const p of points) {
+  		ctx.lineTo(p[0], p[1]);
   	}
   	ctx.closePath();
   	ctx.fill();
   };
 
-
-  drawGenomeImage = (genome, width, height) => {
+  drawGenomeImage = (genome, width, height, orgImage) => {
   	if (!this.ctx) {
   		const canvas =  new OffscreenCanvas(width, height);
   		this.ctx = canvas.getContext('2d');
   	}
   	const ctx = this.ctx;
-  	ctx.fillStyle = '#000000';
+  	ctx.fillStyle = '#ffffff';
   	ctx.fillRect(0,0,width,height); // initially black
 
-    for (let i = 0, j = genome.length; i < j; i += this.settings.chunksize) {
-      const chunk = genome.slice(i, i + this.settings.chunksize);
-      this.drawFilledPoly(ctx, chunk, width, height);
+    // get scaling
+    const sx = width / this.GeneMax;
+    const sy = height / this.GeneMax;
+
+    // convert gene sequence (x1, y1, x2, y2, ...) to points: [ [x1, y1], [x2, y2], ...]
+    const points = [];
+    for (let i = 0; i < genome.length; i+=2) {
+      points.push([
+        genome[i] * sx,
+        genome[i+1] * sy
+      ]);
+    }
+
+    // get the triangle indices into points array
+    const delaunay = Delaunator.from(points);
+
+    // and convert them to actual triangles
+    const triangles = delaunay.triangles;
+    for (let i = 0; i < triangles.length; i += 3) {
+      const t = [
+          points[triangles[i]],
+          points[triangles[i + 1]],
+          points[triangles[i + 2]]
+      ];
+      this.drawPolygon(ctx, orgImage, t, width);
     }
 
   	return ctx.getImageData(0, 0, width, height);
   };
-
-
-  imgDiff3 = (img1, img2) => {
-  	const w = img1.width;
-    const h = img1.height;
-    
-    const len = w * h * 4;
-  	let totalDiff = 0;
-
-  	for (i = 0; i < len; i += 10) {
-      const diff = Math.abs(img1.data[i] - img2.data[i]);
-  			totalDiff += diff / 10;
-  	}
-    return totalDiff;
-  }
 
   imgDiff = (img1, img2) => {
   	const w = img1.width;
@@ -107,7 +107,7 @@ class PicGenetic {
 
   	for (let x = 0; x < w; x+=2) {
   		for (let y = 0; y < h; y+=2) {
-  			var index = (w * y + x) * 4;
+  			const index = (w * y + x) * 4;
   			const r1 = img1.data[index]
   			const g1 = img1.data[index + 1];
   			const b1 = img1.data[index + 2];
@@ -117,14 +117,12 @@ class PicGenetic {
   			const gray1 = (r1+g1+b1)/3;
   			const gray2 = (r2+g2+b2)/3;
 
-  			//const r = Math.abs(r1 - r2);
-  			//const g = Math.abs(g1 - g2);
-  			//const b = Math.abs(b1 - b2);
-  			//const pixelDiff = (r*r + g*g + b*b) / 1000;
+  			const r = Math.abs(r1 - r2);
+  			const g = Math.abs(g1 - g2);
+  			const b = Math.abs(b1 - b2);
+  			const pixelDiff = (r*r + g*g + b*b) / 1000;
 
-  			const pixelDiff = Math.abs(gray1-gray2);
-
-  			totalDiff += (pixelDiff*pixelDiff)/255;//
+  			totalDiff += pixelDiff;
   		}
   	}
 
@@ -140,7 +138,7 @@ class PicGenetic {
    * @param {Array<Number>} sequence The gene sequence to judge
    */
   fitness = (sequence) => {
-    const pic = this.drawGenomeImage(sequence, this.width, this.height);
+    const pic = this.drawGenomeImage(sequence, this.width, this.height, this.imgData);
     return this.imgDiff(pic, this.imgData);
   }
 
@@ -224,7 +222,7 @@ class PicGenetic {
    * @param {Generation} bestSequence Generation object containing .genes and .fitness
    */
   notify = (generation, bestSequence, speedOverall, speedCurrent) => {
-    const img = this.drawGenomeImage(bestSequence.genes, this.imgData.width, this.imgData.height);
+    const img = this.drawGenomeImage(bestSequence.genes, this.imgData.width, this.imgData.height, this.imgData);
   	this.canvas.putImageData(img, 0, 0);
     console.log(`Current generation: ${generation}. Best fitness = ${bestSequence.fitness.toFixed(2)}, speed[O]: ${speedOverall}, speed[C]: ${speedCurrent}`);
   }
