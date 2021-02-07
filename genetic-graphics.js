@@ -3,7 +3,7 @@
 class PicGenetic {
 
   GeneMin = 0;
-  GeneMax = 200;
+  GeneMax = 100;
   GeneSpectrum = this.GeneMax - this.GeneMin;
 
   settings = {
@@ -16,16 +16,20 @@ class PicGenetic {
   tuning = {
     geneshift: new Tune(10, 2, 50),
     geneflips: new Tune(10, 2, 50),
+    edgeintensity: new Tune(200, 20, 2000),
     newkids: new Tune(250, 10, 1000),
     mutate: new Tune(0.3, 0.1, 1.0),
     crossover: new Tune(0.9, 0.1, 1.0)
   };
 
-  constructor (canvas, imgData) {
+  constructor (canvas, imgData, edges) {
     this.canvas = canvas;
     this.imgData = imgData;
     this.width = imgData.width;
     this.height = imgData.height;
+    this.edges = edges;
+    this.tuning['edgeintensity'].max = edges.length;
+    this.tuning['edgeintensity'].val = Math.min(this.tuning['edgeintensity'].val, edges.length);
   }
 
   getPixel = (imgData, w, x, y) => {
@@ -149,10 +153,14 @@ class PicGenetic {
   */
   seed = () => {
     const arr = [];
-    // fill with random genes for now
-    for (let i = 0; i < this.settings.genelength; i++) {
-      const fill = Math.floor(Math.random() * (this.GeneSpectrum) + this.GeneMin);
-      arr.push(fill);
+    // fill genes with x/y coords of likely edges
+    for (let i = 0; i < this.settings.genelength / 2; i++) {
+      const rndIndex = Math.floor(Math.random() * this.tuning['edgeintensity'].val);
+      const point = this.edges[rndIndex];
+      const x = Math.floor(point.x / this.width * this.GeneSpectrum);
+      const y = Math.floor(point.y / this.height * this.GeneSpectrum);
+      arr.push(x);
+      arr.push(y);
     }
     return arr;
   }
@@ -228,12 +236,85 @@ class PicGenetic {
   }
 };
 
+function getGrayPixel(imgData, x, y)
+{
+    var index = (imgData.width * y + x) * 4;
+    const r = imgData.data[index]
+		const g = imgData.data[index + 1];
+		const b = imgData.data[index + 2];
+
+		return 0.2 * r + 0.7 * g + 0.1 * b;
+}
+
+function getImgGradient(imgData) {
+	const w = imgData.width;
+	const h = imgData.height;
+
+	const gradArray = [];
+
+	for (let x = 0; x < w; x++) {
+		for (let y = 0; y < h; y++) {
+			const lum = getGrayPixel(imgData, x, y);
+			let grad = 0;
+			if ((x > 0) && (y > 0) && (x < w-1) && (y < h-1)) {
+				// prewitt compass
+				const nw = Math.abs(lum - getGrayPixel(imgData, x-1, y-1));
+				const n = Math.abs(lum - getGrayPixel(imgData, x, y-1));
+				const ne = Math.abs(lum - getGrayPixel(imgData, x+1, y-1));
+				const w = Math.abs(lum - getGrayPixel(imgData, x-1, y));
+				const e = Math.abs(lum - getGrayPixel(imgData, x+1, y));
+				const sw = Math.abs(lum - getGrayPixel(imgData, x-1, y+1));
+				const s = Math.abs(lum - getGrayPixel(imgData, x, y+1));
+				const se = Math.abs(lum - getGrayPixel(imgData, x+1, y+1));
+				grad = (nw + n + ne + w + e + sw + s + se) / 8;
+			}
+			gradArray.push({x:x, y:y, int: grad});
+		}
+	}
+	return gradArray;
+}
+
+function getClosestDistance(list, check) {
+  let closest = 9999;
+  for (const p of list) {
+    const distX = Math.abs(p.x - check.x);
+    const distY = Math.abs(p.y - check.y);
+    const dist = Math.sqrt(distX * distX + distY * distY);
+    if (dist < closest) {
+      closest = dist;
+    }
+  }
+  return closest;
+}
+
+function sparsePixels(list) {
+  // start with the strongest.
+  const keep = [ list[0] ];
+  // all others are in descending order
+  for (const p of list) {
+    const closest = getClosestDistance(keep, p);
+    if (closest > 15) {
+      // not too close
+      keep.push(p);
+    }
+  }
+  return keep;
+}
+
 async function geneticImage(imgEl, imgData) {
 	const ctx = imgEl.getContext('2d');
 	const w = imgEl.width;
 	const h = imgEl.height;
 
-  const res = await Concurrency.evolution(new PicGenetic(ctx, imgData));
+  // constructs the gradient image (detects edges)
+  const edges = getImgGradient(imgData);
+  // sorts all pixels by sharpness of edge (gradient intensity)
+  edges.sort( (a,b) => b.int - a.int);
+  // then throw away pixels that are too near together
+  const kept = sparsePixels(edges);
+  console.log(`Generated ${edges.length} edge pixels and sorted them. After proximity check ${kept.length} are left.`);
+
+  const res = await Concurrency.evolution(new PicGenetic(ctx, imgData, kept));
   console.log('Finished.');
   console.log(res);
 
